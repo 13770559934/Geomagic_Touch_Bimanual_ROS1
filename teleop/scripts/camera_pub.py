@@ -33,24 +33,51 @@ class CameraPublisher:
             topic_name = f"/camera{camera_id}/image_raw"
             self.publishers[camera_id] = rospy.Publisher(topic_name, Image, queue_size=10)
 
-        self.rate = rate # rate Hz, rate can be a parameter from parameter??
+        self.rate = rospy.Rate(rate) # rate Hz, rate can be a parameter from parameter??
 
     def publish_images(self):
+
+        cam_objs = []
+
+        for camera_id in self.camera_ids:
+            # open camera
+            temp = []
+            cap = cv2.VideoCapture(camera_id)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')) #WHY???
+
+            temp.append(cap)
+            temp.append(camera_id)
+            cam_objs.append(temp)
+
         while not rospy.is_shutdown():
             rospy.loginfo(self.camera_ids)
-            for camera_id in self.camera_ids:
+            for camera_temp in cam_objs:
                 # open camera
-                cap = cv2.VideoCapture(camera_id)
+                cap = camera_temp[0]
+                camera_id = camera_temp[1]
+
                 if not cap.isOpened():
                     rospy.logerr(f"Failed to open camera {camera_id}")
                     continue
                 
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')) #WHY???
                 # read a frame
                 ret, frame = cap.read()
+
+                if frame.dtype != np.uint8:
+                    frame = frame.astype(np.uint8)
+
+                print(type(frame), frame.shape, np.sum(frame), frame.dtype )
+
+                 # 显示图像
+                cv2.imshow(f'Camera {camera_id}', frame)
+
+                # 检测按键
+                if cv2.waitKey(1) & 0xFF == ord('q'):  # 按下 'q' 键退出
+                    cv2.destroyAllWindows()
+                    break
+                
                 if not ret:
                     rospy.logerr(f"Failed to read frame from camera {camera_id}")
-                    cap.release()
                     continue
 
                 #OpenCV image ---> ROS msg
@@ -62,18 +89,19 @@ class CameraPublisher:
 
                 # publish image
                 self.publishers[camera_id].publish(ros_image)
-                cap.release()
 
                 rospy.loginfo( cap.get(cv2.CAP_PROP_FPS))
 
-            # self.rate.sleep()
+            self.rate.sleep()
+
 
 if __name__ == "__main__":
     try:
         # 从参数服务器或命令行获取相机 ID 列表
-        camera_ids = find_available_cameras() # we can change this to getting parameter from ros
-        rospy.loginfo(camera_ids)
+        camera_ids = [0] # we can change this to getting parameter from ros
+        rospy.loginfo('camera_ids')
         camera_publisher = CameraPublisher(camera_ids)
         camera_publisher.publish_images()
     except rospy.ROSInterruptException:
+        cv2.destroyAllWindows()
         pass

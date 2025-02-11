@@ -2,7 +2,8 @@
 
    <arg name="device_name" default="Default Device"/>
    <arg name="prefix" default="Geomagic"/>
-   <param name="publish_rate" type="int" value="1000" />
+   <!-- publish_rate is originally 1000 -->
+   <param name="publish_rate" type="int" value="60" /> 
    
  
    <group ns="$(arg prefix)">
