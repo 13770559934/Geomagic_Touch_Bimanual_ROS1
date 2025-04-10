@@ -1,16 +1,19 @@
 <launch>
-
-   <arg name="device_name" default="Default Device"/>
+   <arg name="right_device_name" default="RightDevice"/>
+   <arg name="left_device_name" default="LeftDevice"/>
    <arg name="prefix" default="Geomagic"/>
    <!-- publish_rate is originally 1000 -->
-   <param name="publish_rate" type="int" value="60" /> 
+   <param name="publish_rate" type="int" value="30" /> 
    
  
    <group ns="$(arg prefix)">
 	<!-- omni node publishes joint states on omni1_joint_states -->
         <node name="$(arg prefix)" pkg="geomagic_control" type="device_node" output="screen">
-            <param name="device_name" type="str" value="$(arg device_name)"/>
+            <param name="right_device_name" type="str" value="$(arg right_device_name)"/>
+            <param name="left_device_name" type="str" value="$(arg left_device_name)"/>
             
+        </node>
+        <node name="joint_state_subscriber" pkg="teleop" type="position_sub.py" output="screen">
         </node>
 	
 	<!-- robot_description tells robot_state_publisher where to find the omni's urdf description -->

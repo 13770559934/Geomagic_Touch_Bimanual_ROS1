@@ -40,6 +40,7 @@
 #include <tf/tf.h>
 #include <tf/LinearMath/Quaternion.h>
 #include <tf/LinearMath/Matrix3x3.h>
+#include <iostream>
 
 int calibrationStyle;
 
@@ -65,6 +66,13 @@ struct DeviceState {
     hduVector3Dd lock_pos;
 };
 
+// Roy definded this as device_state_callback's input to make device_state_callback function know which device_handle and device_states is it taking
+struct DeviceContext {
+    HHD device_handle;  // device_handle
+    DeviceState *state;  // device_state
+};
+
+
 class PhantomROS {
 
 public:
@@ -86,19 +94,31 @@ public:
         _first_run = true;
     }
 
-    void init(DeviceState *s) {
-        ros::param::param(std::string("~device_name"), dev_name,
-                          std::string("Geomagic"));
+    void init(DeviceState *s, const std::string& dev_name) {
+        // I addded one more input to the init function, which is dev_name, 
+
+        // I comment out the following part, and just use dev_name as input to the function
+        // ros::param::param(std::string("~device_name"), dev_name,
+        //                   std::string("Geomagic"));
 
         // Publish joint states for robot_state_publisher,
         // and anyone else who wants them.
         ROS_INFO("Device name: %s", dev_name.c_str() );
+
+        // I added the following part 
+        std::string joint_topic = "joint_states_" + dev_name;
+        std::string twist_topic = "twist_" + dev_name;
+        std::string joy_topic = "joy_" + dev_name;
+        std::string pose_topic = "pose_" + dev_name;
+        std::string button_topic = "button_" + dev_name;
+
         // Initialize Publishers
-        joint_pub = n.advertise<sensor_msgs::JointState>("joint_states", 1);
-        twist_pub = n.advertise<geometry_msgs::Twist>("twist", 1);
-        joy_pub   = n.advertise<sensor_msgs::Joy>("joy",1);
-        pose_pub  = n.advertise<geometry_msgs::PoseStamped>("pose",1);
-        button_pub = n.advertise<geomagic_control::DeviceButtonEvent>("button", 100);
+        joint_pub = n.advertise<sensor_msgs::JointState>(joint_topic, 1);
+        twist_pub = n.advertise<geometry_msgs::Twist>(twist_topic, 1);
+        joy_pub   = n.advertise<sensor_msgs::Joy>(joy_topic,1);
+        pose_pub  = n.advertise<geometry_msgs::PoseStamped>(pose_topic,1);
+        button_pub = n.advertise<geomagic_control::DeviceButtonEvent>(button_topic, 100);
+
         // Initialize Subscriber
         wrench_sub = n.subscribe("force_feedback", 100, &PhantomROS::force_callback, this);
 
@@ -205,15 +225,24 @@ public:
         joint_state_msg.position[5] =  state->thetas[6] + M_PI;
         joint_pub.publish(joint_state_msg);
 
+
+        //  Roy change a bit about this part
+        geomagic_control::DeviceButtonEvent button_event;
+        button_event.grey_button = state->buttons[0];
+        button_event.white_button = state->buttons[1];
+        state->buttons_prev[0] = state->buttons[0];
+        state->buttons_prev[1] = state->buttons[1];
+        button_pub.publish(button_event);
+
         // Set and publish button_event_msg
-        if ((state->buttons[0] != state->buttons_prev[0]) || (state->buttons[1] != state->buttons_prev[1])){
-            geomagic_control::DeviceButtonEvent button_event;
-            button_event.grey_button = state->buttons[0];
-            button_event.white_button = state->buttons[1];
-            state->buttons_prev[0] = state->buttons[0];
-            state->buttons_prev[1] = state->buttons[1];
-            button_pub.publish(button_event);
-        }
+        // if ((state->buttons[0] != state->buttons_prev[0]) || (state->buttons[1] != state->buttons_prev[1])){
+        //     geomagic_control::DeviceButtonEvent button_event;
+        //     button_event.grey_button = state->buttons[0];
+        //     button_event.white_button = state->buttons[1];
+        //     state->buttons_prev[0] = state->buttons[0];
+        //     state->buttons_prev[1] = state->buttons[1];
+        //     button_pub.publish(button_event);
+        // }
 
         // Set and publish twist_msg
         twist_msg.linear.x = state->velocity[0];
@@ -248,17 +277,22 @@ public:
 };
 
 HDCallbackCode HDCALLBACK device_state_callback(void *pUserData) {
-    DeviceState *device_state = static_cast<DeviceState *>(pUserData);
+    DeviceContext *context = static_cast<DeviceContext *>(pUserData);
+    HHD device_handle = context->device_handle;
+    DeviceState *device_state = context->state;
+
     if (hdCheckCalibration() == HD_CALIBRATION_NEEDS_UPDATE) {
         ROS_DEBUG("Updating calibration...");
         hdUpdateCalibration(calibrationStyle);
     }
-    hdBeginFrame(hdGetCurrentDevice());
+    hdBeginFrame(device_handle);
     //Get angles, set forces
     hdGetDoublev(HD_CURRENT_GIMBAL_ANGLES, device_state->rot);
     hdGetDoublev(HD_CURRENT_POSITION, device_state->position);
     hdGetDoublev(HD_CURRENT_JOINT_ANGLES, device_state->joints);
     hdGetDoublev(HD_CURRENT_TRANSFORM, device_state->transform);
+
+    // std::cout << "The value is: " << device_state->position << std::endl;
 
     hduVector3Dd vel_buff(0, 0, 0);
     vel_buff = (device_state->position * 3 - 4 * device_state->pos_hist1
@@ -289,7 +323,7 @@ HDCallbackCode HDCALLBACK device_state_callback(void *pUserData) {
     device_state->buttons[0] = (nButtons & HD_DEVICE_BUTTON_1) ? 1 : 0;
     device_state->buttons[1] = (nButtons & HD_DEVICE_BUTTON_2) ? 1 : 0;
 
-    hdEndFrame(hdGetCurrentDevice());
+    hdEndFrame(device_handle);
 
     HDErrorInfo error;
     if (HD_DEVICE_ERROR(error = hdGetError())) {
@@ -345,15 +379,34 @@ void HHD_Auto_Calibration() {
 int main(int argc, char** argv) {
     ros::init(argc, argv, "geomagic_control_node");
     ros::NodeHandle nh("~");
-    std::string device_name="";
-    nh.getParam("device_name", device_name);
-    ROS_INFO("Device name: %s", device_name.c_str());
+
+    // get the name of two geomagic touch device from parameter
+    std::string left_device_name="";
+    std::string right_device_name="";
+    // std::cout << "The value is: " << left_device_name << std::endl;
+    // std::cout << "The value is: " << right_device_name << std::endl;
+    nh.getParam("left_device_name", left_device_name);
+    nh.getParam("right_device_name", right_device_name);
+    // std::cout << "The value is: " << left_device_name << std::endl;
+    // std::cout << "The value is: " << right_device_name << std::endl;
+
+    ROS_INFO("Left Device name: %s", left_device_name.c_str());
+    ROS_INFO("Right Device name: %s", right_device_name.c_str());
+
     ////////////////////////////////////////////////////////////////
     // Init Phantom
     ////////////////////////////////////////////////////////////////
     HDErrorInfo error;
-    HHD hHD;
-    hHD = hdInitDevice(device_name.c_str());//use ros param and set in launch file
+
+    // inilizate two device with the device name get from parameter
+    HHD hHD_left;
+    HHD hHD_right;
+
+    hHD_left = hdInitDevice(left_device_name.c_str());
+    // //use ros param and set in launch file
+    hHD_right = hdInitDevice(right_device_name.c_str());
+
+
     if (HD_DEVICE_ERROR(error = hdGetError())) {
         //hduPrintError(stderr, &error, "Failed to initialize haptic device");
         ROS_ERROR("Failed to initialize haptic device"); //: %s", &error);
@@ -381,31 +434,45 @@ int main(int argc, char** argv) {
     // Init ROS
     ////////////////////////////////////////////////////////////////
 
-    DeviceState state;
-    PhantomROS device_ros;
-    device_ros.init(&state);
-    hdScheduleAsynchronous(device_state_callback, &state,
+    DeviceState state_left;
+    DeviceState state_right;
+
+    DeviceContext context_left = {hHD_left, &state_left};
+    DeviceContext context_right = {hHD_right, &state_right};
+
+    // Roy make it have 2 PhantomROS objects
+    PhantomROS left_device_ros;
+    PhantomROS right_device_ros;
+    left_device_ros.init(&state_left, left_device_name);
+    right_device_ros.init(&state_right, right_device_name);
+
+
+    hdScheduleAsynchronous(device_state_callback, &context_left,
+                           HD_MAX_SCHEDULER_PRIORITY);
+    hdScheduleAsynchronous(device_state_callback, &context_right,
                            HD_MAX_SCHEDULER_PRIORITY);
 
     ////////////////////////////////////////////////////////////////
     // Loop and publish
     ////////////////////////////////////////////////////////////////
     int publish_rate;
-    device_ros.n.param(std::string("/publish_rate"), publish_rate, 100);
+    left_device_ros.n.param(std::string("/publish_rate"), publish_rate, 100);
+    right_device_ros.n.param(std::string("/publish_rate"), publish_rate, 100);
     ROS_INFO("Publish rate set to %d", publish_rate);
     ros::Rate loop_rate(publish_rate);
     ros::AsyncSpinner spinner(2);
     spinner.start();
 
     while (ros::ok()) {
-        device_ros.publish_device_state();
+        left_device_ros.publish_device_state();
+        right_device_ros.publish_device_state();
         loop_rate.sleep();
     }
 
     ROS_INFO("Ending Session....");
     hdStopScheduler();
-    hdDisableDevice(hHD);
+    hdDisableDevice(hHD_left);
+    hdDisableDevice(hHD_right);
 
     return 0;
 }
-

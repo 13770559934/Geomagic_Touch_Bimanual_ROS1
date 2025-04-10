@@ -7,7 +7,7 @@ from cv_bridge import CvBridge, CvBridgeError
 
 def find_available_cameras():
     available_cameras = []
-    for camera_id in range(10):  # 尝试检查前 10 个可能的相机 ID
+    for camera_id in range(10): 
         print(camera_id)
         cap = cv2.VideoCapture(camera_id)
         if cap.isOpened():
@@ -15,10 +15,8 @@ def find_available_cameras():
             available_cameras.append(camera_id)
             cap.release()
         else:
-            continue  # 如果无法打开当前 ID 的相机，后续的 ID 也不太可能有效
+            continue
     return available_cameras
-
-
 
 class CameraPublisher:
     def __init__(self, camera_ids, rate = 60):
@@ -97,7 +95,6 @@ class CameraPublisher:
 
 if __name__ == "__main__":
     try:
-        # 从参数服务器或命令行获取相机 ID 列表
         camera_ids = [0] # we can change this to getting parameter from ros
         rospy.loginfo('camera_ids')
         camera_publisher = CameraPublisher(camera_ids)
