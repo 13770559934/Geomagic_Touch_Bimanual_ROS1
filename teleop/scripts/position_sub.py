@@ -11,7 +11,6 @@ import time
 class JointStateSubscriber:
     # every device should have its own 'JointStateSubscriber' class
     def __init__(self, 
-                 node_name:str,
                  state_topic_name:str,
                  button_topic_name:str,
                  position_port:int,
